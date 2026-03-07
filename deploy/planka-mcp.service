@@ -1,0 +1,22 @@
+[Unit]
+Description=Planka MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Adjust this path to where your repository or compiled binary lives
+WorkingDirectory=/opt/planka-mcp
+
+# Environment Variables needed
+# IMPORTANT: Provide your own real URL and Token without quotation marks inside this config
+Environment=PLANKA_URL=http://your-planka-domain/
+Environment=PLANKA_TOKEN=YOUR_API_KEY_HERE
+
+# Execute binary. Update the path based on your `xmake build` output dir.
+ExecStart=/opt/planka-mcp/build/linux/x86_64/release/planka-mcp --http --port 7526
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
