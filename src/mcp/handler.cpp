@@ -6,6 +6,7 @@
 #include <coke/coke.h>
 #include "planka/client.h"
 #include <logger.h>
+#include "config.h"
 
 namespace mcp {
 
@@ -41,7 +42,7 @@ std::optional<std::string> McpHandler::handle_message(const std::string& json_st
             
             wfrest::Json serverInfo = wfrest::Json::Object();
             serverInfo.push_back("name", "planka-mcp");
-            serverInfo.push_back("version", "26.03.09");
+            serverInfo.push_back("version", PLANKA_MCP_VERSION);
             result.push_back("serverInfo", serverInfo);
             
             wfrest::Json capabilities = wfrest::Json::Object();

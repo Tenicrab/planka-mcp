@@ -22,7 +22,7 @@ TEST_CASE("McpHandler Verification Suite") {
     config.api_key = PlankaClient::get_env("PLANKA_API_KEY");
 
     mcp::ResourceRegistry registry;
-    mcp::ToolRegistry tool_registry;
+    mcp::ToolRegistry tool_registry(registry);
     mcp::McpHandler handler(registry, tool_registry);
     std::string ts = std::to_string(std::time(nullptr));
 

@@ -1,10 +1,12 @@
 #include "registry.h"
 #include <regex>
 #include <logger.h>
+#include "../resources/registry.h"
 
 namespace mcp {
 
-ToolRegistry::ToolRegistry() {
+ToolRegistry::ToolRegistry(ResourceRegistry& resource_registry) 
+    : resource_registry_(resource_registry) {
     init_definitions();
 }
 
@@ -84,7 +86,7 @@ std::vector<Tool> ToolRegistry::list_tools() {
 
     wfrest::Json action_name = wfrest::Json::Object();
     action_name.push_back("type", "string");
-    action_name.push_back("description", "Action to perform (e.g., duplicate_card, move_cards_in_list, setup_card_member, add_card_label).");
+    action_name.push_back("description", "Action to perform (e.g., duplicate_card, move_cards_in_list, add_card_member, add_card_label).");
     a_props.push_back("action", action_name);
     a_req.push_back("action");
 
@@ -96,6 +98,24 @@ std::vector<Tool> ToolRegistry::list_tools() {
     action_schema.push_back("properties", a_props);
     action_schema.push_back("required", a_req);
     tools.push_back({"planka_action", "Perform specialized actions/relationships (move, sort, membership, custom fields).", action_schema});
+
+    // 5. planka_explore
+    wfrest::Json explore_schema = wfrest::Json::Object();
+    explore_schema.push_back("type", "object");
+    wfrest::Json e_props = wfrest::Json::Object();
+    
+    wfrest::Json uri_field = wfrest::Json::Object();
+    uri_field.push_back("type", "string");
+    uri_field.push_back("description", "Resource URI to explore (e.g., planka://projects).");
+    e_props.push_back("uri", uri_field);
+
+    wfrest::Json templates_field = wfrest::Json::Object();
+    templates_field.push_back("type", "boolean");
+    templates_field.push_back("description", "Set to true to list available URI templates instead of roots.");
+    e_props.push_back("templates", templates_field);
+
+    explore_schema.push_back("properties", e_props);
+    tools.push_back({"planka_explore", "Explore resources or list discovery paths. Call with templates:true to see URI templates.", explore_schema});
 
     return tools;
 }
@@ -109,6 +129,71 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
         response_content.push_back(item);
         return response_content;
     };
+
+    if (name == "planka_explore") {
+        std::string uri = "";
+        bool show_templates = false;
+
+        if (arguments.has("uri") && arguments["uri"].is_string()) {
+            uri = arguments["uri"].get<std::string>();
+        }
+        if (arguments.has("templates") && arguments["templates"].is_boolean()) {
+            show_templates = arguments["templates"].get<bool>();
+        }
+
+        if (uri.empty()) {
+            wfrest::Json discovery = wfrest::Json::Object();
+            if (show_templates) {
+                wfrest::Json templates = wfrest::Json::Array();
+                for (const auto& t : resource_registry_.list_templates()) {
+                    wfrest::Json tj = wfrest::Json::Object();
+                    tj.push_back("uriTemplate", t.uriTemplate);
+                    tj.push_back("name", t.name);
+                    tj.push_back("description", t.description);
+                    templates.push_back(tj);
+                }
+                discovery.push_back("availableTemplates", templates);
+                discovery.push_back("_hint", "These are templates. Replace {id} with actual IDs when calling planka_explore.");
+            } else {
+                wfrest::Json roots = wfrest::Json::Array();
+                for (const auto& r : resource_registry_.list_resources()) {
+                    wfrest::Json rj = wfrest::Json::Object();
+                    rj.push_back("uri", r.uri);
+                    rj.push_back("name", r.name);
+                    rj.push_back("description", r.description);
+                    roots.push_back(rj);
+                }
+                discovery.push_back("availableRoots", roots);
+                discovery.push_back("_hint", "Call with templates:true to see all URI templates, or provide a specific URI to explore data.");
+            }
+
+            wfrest::Json content = wfrest::Json::Array();
+            wfrest::Json item = wfrest::Json::Object();
+            item.push_back("type", "text");
+            item.push_back("text", discovery.dump(4));
+            content.push_back(item);
+            co_return content;
+        }
+        
+        wfrest::Json resource_data = co_await resource_registry_.read_resource(uri, client);
+        if (resource_data.is_array() && !resource_data.empty()) {
+            wfrest::Json tool_content = wfrest::Json::Array();
+            for (const auto& item : resource_data) {
+                wfrest::Json text_item = wfrest::Json::Object();
+                text_item.push_back("type", "text");
+                // Resource response from read_resource has "text" field
+                if (item.has("text")) {
+                    text_item.push_back("text", item["text"]);
+                } else {
+                    text_item.push_back("text", item.dump());
+                }
+                tool_content.push_back(text_item);
+            }
+            co_return tool_content;
+        } else {
+            co_return make_err("Error: Resource not found or unsupported URI for explore: " + uri);
+        }
+    }
 
     if (name == "planka_create" || name == "planka_update" || name == "planka_delete") {
         if (!arguments.has("entity_type") || !arguments["entity_type"].is_string()) {
@@ -156,6 +241,9 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
             co_return make_err("Error: Missing action in arguments");
         }
         std::string internal_name = arguments["action"].get<std::string>();
+        // Name normalization: setup_card_member -> add_card_member
+        if (internal_name == "setup_card_member") internal_name = "add_card_member";
+
         wfrest::Json internal_args = arguments.has("data") && arguments["data"].is_object() ? arguments["data"] : wfrest::Json::Object();
         
         for (const auto& def : definitions_) {
@@ -170,6 +258,15 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
 }
 
 coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const wfrest::Json& args, PlankaClient& client) {
+    auto make_raw_err = [](const std::string& msg) {
+        wfrest::Json response_content = wfrest::Json::Array();
+        wfrest::Json item = wfrest::Json::Object();
+        item.push_back("type", "text");
+        item.push_back("text", msg);
+        response_content.push_back(item);
+        return response_content;
+    };
+
     std::string path = def.path;
     
     // Replace URL parameters like {id}
@@ -189,10 +286,7 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
     }
 
     if (!all_params_replaced) {
-        wfrest::Json err = wfrest::Json::Object();
-        err.push_back("isError", true);
-        err.push_back("message", "Missing required URL parameter in: " + path);
-        co_return err;
+        co_return make_raw_err("Error: Missing required URL parameter in: " + path);
     }
     path = current_path;
     LOG_INFO() << "[ToolRegistry] " << def.name << " | Args: " << args.dump();
@@ -207,7 +301,7 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
         }
     }
 
-    // Default position/type if needed for creation
+    // Default position/type if needed for creation (Researched: Planka uses Numeric GAP=16384)
     if (def.method == "POST") {
         bool is_card_creation = (path.find("/api/lists/") != std::string::npos && path.find("/cards") != std::string::npos && path.find("/attachments") == std::string::npos);
         if (is_card_creation || 
@@ -215,10 +309,11 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
             path.find("/api/projects/") != std::string::npos && path.find("/boards") != std::string::npos) {
             
             if (!body.has("position"))
-                body.push_back("position", 65536);
+                body.push_back("position", 16384); // Optimized default GAP
         }
 
         if (is_card_creation) {
+            // Cards in Planka v2 default to 'project' type if not specified
             if (!body.has("type"))
                 body.push_back("type", "project");
         }

@@ -1,4 +1,3 @@
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -9,6 +8,7 @@
 #include "transport/stdio.h"
 #include "transport/http_sse.h"
 #include <logger.h>
+#include "config.h"
 
 int main(int argc, char* argv[]) {
     // Initialize maplog
@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
         .setFileLevel(maplog::LogLevel::DEBUG)  // 文件：保留 DEBUG 以供离线调试
         .init();
 
-    LOG_INFO("planka-mcp logger initialized.");
+    LOG_INFO() << "planka-mcp v" << PLANKA_MCP_VERSION << " logger initialized.";
     // 默认配置
     bool http_mode = false;
     int port = 7526;
@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
 
     // 初始化注册表 (不持有 Client 状态)
     mcp::ResourceRegistry registry;
-    mcp::ToolRegistry tool_registry;
+    mcp::ToolRegistry tool_registry(registry);
     
     // 初始化无状态 Handler
     mcp::McpHandler handler(registry, tool_registry);

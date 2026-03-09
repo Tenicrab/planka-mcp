@@ -9,10 +9,11 @@
 namespace mcp
 {
 
-class ToolRegistry
-{
+class ResourceRegistry;
+
+class ToolRegistry {
 public:
-    ToolRegistry();
+    ToolRegistry(ResourceRegistry& resource_registry);
 
     // tools/list
     std::vector<Tool> list_tools();
@@ -21,6 +22,7 @@ public:
     coke::Task<wfrest::Json> call_tool(const std::string& name, const wfrest::Json& arguments, PlankaClient& client);
 
 private:
+    ResourceRegistry& resource_registry_;
     std::vector<ToolDef> definitions_;
     void init_definitions();
 

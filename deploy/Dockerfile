@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
     git \
     wget \
     curl \
-    libssl-dev \
     pkg-config \
     zlib1g-dev \
     unzip \
@@ -47,7 +46,6 @@ FROM ubuntu:24.04
 # Install runtime libraries and certificates
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

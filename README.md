@@ -16,9 +16,15 @@ This high-performance MCP server transforms your Planka instance into a structur
 
 ---
 
-## ⚙️ Configuration (mcpServers.json)
+Planka-MCP adapts to your environment through three primary operation modes:
 
-Planka-MCP adapts to your environment: **Stdio** for local desktop use, and **SSE** for remote/Docker deployment.
+1.  **💻 Local Binary (Stdio)**: Direct integration with desktop AI clients (Cursor, Claude Desktop).
+2.  **🌐 Background Service (HTTP/SSE)**: Host as a persistent web service (supports Systemd).
+3.  **🐳 Containerized Gateway (Docker)**: Production-grade, multi-platform deployment.
+
+---
+
+## ⚙️ Configuration (mcpServers.json)
 
 ### 1. Stdio Mode (CLI Driven)
 Ideal for **Claude Desktop** or **Cursor**. Credential injection is handled via arguments.
@@ -45,7 +51,7 @@ Ideal for **Docker** or cloud deployment. The server acts as a stateless bridge.
 {
   "mcpServers": {
     "planka": {
-      "url": "http://your-gateway-ip:7526/",
+      "url": "http://your-gateway-ip:7526/",//or http://xxx:7526/mcp
       "headers": {
         "X-Planka-Url": "https://your-planka-instance.top:8080",
         "X-Planka-Api-Key": "HwQsvOKO_YOUR_SECRET_KEY"
@@ -57,43 +63,54 @@ Ideal for **Docker** or cloud deployment. The server acts as a stateless bridge.
 
 ---
 
-## 🏗️ Getting the Binary
+## 🚀 Installation & Quick Start
 
-### Option A: Build from Source
+### Option A: From Docker Hub (Recommended)
+The easiest way to get started. No local build required.
+```bash
+docker pull tenire/planka-mcp:latest
+```
 
-**Environment:** Linux (Ubuntu 24.04), C++20 compiler.
+**Run as a Stateless HTTP/SSE Gateway:**
+```bash
+# Recommended for IPv6 stability and proper signal handling
+docker run -d --name planka-mcp \
+  --network host \
+  --init \
+  --restart always \
+  tenire/planka-mcp:latest --http --port 7526
+```
+
+---
+
+### Option B: Build from Source
+**Requirement:** Linux (Ubuntu 24.04), C++20 compiler.
 
 1. **Install xmake**:
    ```bash
    curl -fsSL https://xmake.io/shget.text | bash
-   # source ~/.bashrc 
    ```
 
 2. **Clone & Build**:
    ```bash
    git clone https://github.com/Tenicrab/planka-mcp.git
    cd planka-mcp
-
-   # Build and Install to ./dist
    xmake f -m release --yes
    xmake build planka-mcp
    xmake install -o ./dist planka-mcp
    ```
-   Binary: `./dist/bin/planka-mcp`.
+   Binary location: `./dist/bin/planka-mcp`.
 
-### Option B: Docker Deployment
-No secrets are stored in the image. Credentials are injected by the Agent via Headers or Args.
+**Run as a persistent HTTP/SSE Service:**
+```bash
+./dist/bin/planka-mcp --http --port 7526
+```
+(You can also use `systemd` to manage it as a background service).
 
-**Recommended for IPv6 stability and proper signal handling:**
+### Option C: Manual Docker Build
+If you want to build your own image locally:
 ```bash
 docker build -t planka-mcp:latest -f deploy/Dockerfile .
-
-# Run with --network host for native IPv6 support and --init for Ctrl+C support
-docker run -d --name planka-mcp \
-  --network host \
-  --init \
-  --restart always \
-  planka-mcp:latest --http --port 7526
 ```
 
 ---
