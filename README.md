@@ -1,109 +1,108 @@
-# Planka MCP (Model Context Protocol) Server v26.03.08
+# Planka MCP Server 🚀
+> The most powerful, decentralized bridge between AI Agents and Planka v2.
 
-A high-performance C++20 based Model Context Protocol (MCP) server that connects large language model agents to Planka v2.
+[![Language](https://img.shields.io/badge/Language-C%2B%2B20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+[![License](https://img.shields.io/badge/License-Fair%20Use-green.svg)](https://github.com/plankanban/planka/blob/master/LICENSE.md)
 
-## Highlights
+This high-performance MCP server transforms your Planka instance into a structured knowledge base for AI Assistants (Claude, Cursor, etc.). 
 
-- **Full API Coverage**: Exposes 33+ meticulously mapped Planka v2 API actions to agents, including cascading operations, advanced enum verifications, and custom field handling.
-- **Webhook Bridge**: Native support for Planka event tunneling. Agents can use the `subscribe_planka_events` tool to dynamically attach notification hooks that securely relay deep-nested Planka JSONs to the Agent's neural pathways via template rendering.
-- **Asymmetric Precision Safety**: Solves Snowflake ID data destruction constraints globally by utilizing strict string-dump serialization to preserve 17+ digit Long Ints cleanly.
-- **Progressive Sandbox**: Safe, test-driven validation sandbox using `coke` concurrent handling, preventing agent hallucinations scaling out of control.
+## 🌟 Key Features
 
-## Building from Source
+- **Progressive Discovery**: Instead of overwhelming your AI with 60+ tools, we use **Dynamic Resources** (`planka://hub`, `planka://projects`) to guide the Agent. It only sees what it needs, when it needs it.
+- **The "God Hub"**: Start with `planka://hub` for a global overview of your entire Planka instance—projects, users, and unread notifications at a glance.
+- **Decentralized Notifications**: Custom `Notification Services` support. Non-admin users can now build their own automation flows by bridging Planka events to local receivers via reverse-proxy (frp).
+- **Stateless & Secure**: Zero persistence on the server side. Credentials are injected per-request by the Agent, ensuring absolute privacy and multi-tenant support.
+- **Native C++20 Performance**: Built with `coke` and `wfrest`, leveraging high-concurrency coroutines for zero-latency interactions.
 
-**Requirements:**
+---
 
-- Linux (Ubuntu 22.04/24.04 recommended)
-- `xmake`
-- A C++20 compliant compiler (GCC 11+)
+## ⚙️ Configuration (mcpServers.json)
 
-```bash
-# Clone the repository
-git clone https://github.com/your-username/planka-mcp.git
-cd planka-mcp
+Planka-MCP adapts to your environment: **Stdio** for local desktop use, and **SSE** for remote/Docker deployment.
 
-# Fetch dependencies and build statically (using xmake)
-xmake f -m release --yes
-xmake build planka-mcp
-```
-
-The compiled binary will be placed in `build/linux/x86_64/release/planka-mcp`.
-
-## Running the Server
-
-### Method 1: Stdio Mode (For local Agents like Claude Desktop)
-
-Most AI clients run MCP plugins natively via standard input/output. You can point your AI client to execute the binary directly.
+### 1. Stdio Mode (CLI Driven)
+Ideal for **Claude Desktop** or **Cursor**. Credential injection is handled via arguments.
 
 ```json
 {
   "mcpServers": {
     "planka": {
-      "command": "/absolute/path/to/planka-mcp",
-      "env": {
-        "PLANKA_URL": "http://your-planka-domain/",
-        "PLANKA_TOKEN": "YOUR_API_KEY_HERE"
+      "command": "/usr/local/bin/planka-mcp",
+      "args": [
+        "--stdio",
+        "--url", "https://your-planka-instance.top:8080",
+        "--api-key", "HwQsvOKO_YOUR_SECRET_KEY"
+      ]
+    }
+  }
+}
+```
+
+### 2. SSE Mode (Gateway Driven)
+Ideal for **Docker** or cloud deployment. The server acts as a stateless bridge.
+
+```json
+{
+  "mcpServers": {
+    "planka": {
+      "url": "http://your-gateway-ip:7526/",
+      "headers": {
+        "X-Planka-Url": "https://your-planka-instance.top:8080",
+        "X-Planka-Api-Key": "HwQsvOKO_YOUR_SECRET_KEY"
       }
     }
   }
 }
 ```
 
-### Method 2: HTTP Webhook / SSE Mode (Port 7526)
+---
 
-If you wish to allow the MCP to receive Webhooks pushed directly from the Planka system, it must maintain a persistent, port-listening HTTP server state.
+## 🏗️ Getting the Binary
 
-```bash
-export PLANKA_URL="http://your-planka-domain/"
-export PLANKA_TOKEN="YOUR_API_KEY_HERE"
+### Option A: Build from Source
 
-./build/linux/x86_64/release/planka-mcp --http --port 7526
-```
+**Environment:** Linux (Ubuntu 24.04), C++20 compiler.
 
-## Deployment Options
+1. **Install xmake**:
+   ```bash
+   curl -fsSL https://xmake.io/shget.text | bash
+   # source ~/.bashrc 
+   ```
 
-When running in HTTP mode (to receive Planka webhooks), the MCP Server needs to listen on **Port 7526**. You can deploy it natively or via Docker.
+2. **Clone & Build**:
+   ```bash
+   git clone https://github.com/Tenicrab/planka-mcp.git
+   cd planka-mcp
 
-### Option A: Native Systemd (Highest Performance, No NAT headache)
-
-We recommend running this natively if the MCP Server and Planka/Agent sit on the same physical routing layer.
-
-1. Edit the provided template in `deploy/planka-mcp.service` so that `Environment` variables contain your credentials and `ExecStart` points to your built binary.
-2. Install the service:
-
-```bash
-sudo cp deploy/planka-mcp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable planka-mcp
-sudo systemctl start planka-mcp
-```
+   # Build and Install to ./dist
+   xmake f -m release --yes
+   xmake build planka-mcp
+   xmake install -o ./dist planka-mcp
+   ```
+   Binary: `./dist/bin/planka-mcp`.
 
 ### Option B: Docker Deployment
+No secrets are stored in the image. Credentials are injected by the Agent via Headers or Args.
 
-If you prefer complete environment isolation, a multi-stage `Dockerfile` (based on Ubuntu 24.04 LTS) is provided.
-
-**Build:**
-
+**Recommended for IPv6 stability and proper signal handling:**
 ```bash
 docker build -t planka-mcp:latest -f deploy/Dockerfile .
-```
 
-**Run (Standard Port Mapping):**
-
-```bash
+# Run with --network host for native IPv6 support and --init for Ctrl+C support
 docker run -d --name planka-mcp \
-  -p 7526:7526 \
-  -e PLANKA_URL="http://your-planka-domain/" \
-  -e PLANKA_TOKEN="YOUR_API_KEY_HERE" \
-  planka-mcp:latest
+  --network host \
+  --init \
+  --restart always \
+  planka-mcp:latest --http --port 7526
 ```
 
-> **⚠️ CRITICAL: Webhook Isolation Notice!**  
-> If you run the MCP in a standard Docker bridge (like above), and your Agent uses `subscribe_planka_events` to ask the MCP to forward notifications to `http://127.0.0.1:9090`, the MCP will fail! Inside the container, `127.0.0.1` refers to the container itself, not the host machine.
->
-> **Solution 1 (Linux only):** Add `--network host` to strip Docker's network isolation.  
-> **Solution 2 (Cross-platform):** Program your Agent to use `http://host.docker.internal:9090` instead of `127.0.0.1`.
+---
 
-## Security
+## 🔒 Stateless Security
 
-Planka v2 restricts API access to Webhooks (`/api/webhooks`) and System configs strictly to accounts with the **ADMIN** role. It avoids sending an HTTP `403 Forbidden` and instead **cloaks the endpoint behind an HTTP `404 Not Found`**. Make sure your `PLANKA_TOKEN` belongs to an Admin account if you attempt to use those specific endpoints.
+- **Agent-Driven**: This server follows the **Principle of Agent-Controlled Configuration**. It does not persist credentials.
+- **Multitenancy**: A single server instance can safely serve multiple users with different Planka backends by using separate headers for each client connection.
+- **Precision**: Enforces string-based Snowflake ID handling to prevent precision loss in LLM interactions.
+
+## ⚠️ Networking Note
+When running in Docker and forwarding events back to a local Agent, use `http://host.docker.internal:PORT` to bridge container isolation.

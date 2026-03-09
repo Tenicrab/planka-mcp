@@ -9,39 +9,18 @@
 namespace mcp
 {
 
-struct ToolParam
-{
-    std::string name;
-    std::string type;
-    std::string description;
-    bool required = true;
-    std::vector<std::string> enum_values = {};
-};
-
-struct ToolDef
-{
-    std::string name;
-    std::string description;
-    std::string method;
-    std::string path_template;
-    std::vector<ToolParam> params;
-    std::string item_type;          // e.g. "project", "card"
-    std::string body_type = "json"; // "json" or "none"
-};
-
 class ToolRegistry
 {
 public:
-    explicit ToolRegistry(PlankaClient& client);
+    ToolRegistry();
 
     // tools/list
     std::vector<Tool> list_tools();
 
     // tools/call
-    coke::Task<wfrest::Json> call_tool(const std::string& name, const wfrest::Json& arguments);
+    coke::Task<wfrest::Json> call_tool(const std::string& name, const wfrest::Json& arguments, PlankaClient& client);
 
 private:
-    PlankaClient& client_;
     std::vector<ToolDef> definitions_;
     void init_definitions();
 
@@ -49,7 +28,7 @@ private:
     wfrest::Json build_schema(const ToolDef& def);
 
     // Generic API caller based on ToolDef
-    coke::Task<wfrest::Json> execute_generic(const ToolDef& def, const wfrest::Json& args);
+    coke::Task<wfrest::Json> execute_generic(const ToolDef& def, const wfrest::Json& args, PlankaClient& client);
 };
 
 } // namespace mcp

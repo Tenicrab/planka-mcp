@@ -8,12 +8,13 @@ class PlankaClient {
 public:
     struct Config {
         std::string url;
-        std::string token;
+        std::string api_key;
     };
 
     explicit PlankaClient(const Config& config);
     
     static PlankaClient from_env();
+    static std::string get_env(const std::string& name);
 
     // Core async requester
     coke::Task<wfrest::Json> get(const std::string& path);

@@ -8,18 +8,25 @@
 
 namespace mcp {
 
+struct ResourceTemplate {
+    std::string uriTemplate;
+    std::string name;
+    std::string description;
+    std::string mimeType;
+};
+
 class ResourceRegistry {
 public:
-    explicit ResourceRegistry(PlankaClient& client);
+    ResourceRegistry() = default;
 
     // resources/list
     std::vector<Resource> list_resources();
 
-    // resources/read
-    coke::Task<wfrest::Json> read_resource(const std::string& uri);
+    // resources/templates/list
+    std::vector<ResourceTemplate> list_templates();
 
-private:
-    PlankaClient& client_;
+    // resources/read
+    coke::Task<wfrest::Json> read_resource(const std::string& uri, PlankaClient& client);
 };
 
 } // namespace mcp

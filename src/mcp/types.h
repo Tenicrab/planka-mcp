@@ -9,6 +9,23 @@ struct Resource {
     std::string uri;
     std::string name;
     std::string description;
+    std::string mimeType;
+};
+
+struct FieldDef {
+    std::string name;
+    std::string description;
+    std::string type;
+    bool required;
+    std::vector<std::string> options = {};
+};
+
+struct ToolDef {
+    std::string name;
+    std::string description;
+    std::string method;
+    std::string path;
+    std::vector<FieldDef> fields;
 };
 
 struct Tool {

@@ -10,12 +10,11 @@ class ToolRegistry;
 
 class McpHandler {
 public:
-    McpHandler(PlankaClient& client, ResourceRegistry& registry, ToolRegistry& tool_registry);
+    McpHandler(ResourceRegistry& registry, ToolRegistry& tool_registry);
 
-    std::optional<std::string> handle_message(const std::string& json_str);
+    std::optional<std::string> handle_message(const std::string& json_str, const PlankaClient::Config& config);
 
 private:
-    PlankaClient& client_;
     ResourceRegistry& registry_;
     ToolRegistry& tool_registry_;
 };
