@@ -110,11 +110,23 @@ std::optional<std::string> McpHandler::handle_message(const std::string& json_st
             if (!req.has("params") || !req["params"].has("name")) {
                 return JsonRpcResponse::make_error(id, -32602, "Invalid params: missing name").to_string();
             }
+
             std::string name = req["params"]["name"].get<std::string>();
-            wfrest::Json args = req["params"].has("arguments") ? req["params"]["arguments"] : wfrest::Json::Object();
-            
+            wfrest::Json args = wfrest::Json::Object();
+
+            if (req["params"].has("arguments")) {
+                if (req["params"]["arguments"].is_object()) {
+                    args = req["params"]["arguments"];
+                } else {
+                    return JsonRpcResponse::make_error(id, -32602, 
+                        "Invalid params: 'arguments' MUST be a JSON Object per MCP 2024-11-05. "
+                        "Do NOT stringify the arguments object.").to_string();
+                }
+            }
+
             wfrest::Json content = coke::sync_wait(tool_registry_.call_tool(name, args, client));
-            if (content.is_valid()) {
+
+            if (content.is_array()) {
                 wfrest::Json result = wfrest::Json::Object();
                 result.push_back("content", content);
                 return JsonRpcResponse::make_success(id, result).to_string();

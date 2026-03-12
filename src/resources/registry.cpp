@@ -282,12 +282,20 @@ coke::Task<wfrest::Json> ResourceRegistry::read_resource(const std::string& uri,
             summary.push_back("name", safe_get_string(b["item"], "name"));
             
             wfrest::Json lists_summary = wfrest::Json::Array();
+            std::string archive_list_id = "";
+            std::string trash_list_id = "";
             if (b.has("included") && b["included"].has("lists")) {
                 for (const auto& l : b["included"]["lists"]) {
-                    wfrest::Json lj = wfrest::Json::Object();
                     std::string lid = safe_get_string(l, "id");
+                    std::string ltype = safe_get_string(l, "type");
+                    // 记录系统隐藏 list，不加入普通 list 列表
+                    if (ltype == "archive") { archive_list_id = lid; continue; }
+                    if (ltype == "trash")   { trash_list_id = lid; continue; }
+
+                    wfrest::Json lj = wfrest::Json::Object();
                     lj.push_back("id", lid);
                     lj.push_back("name", safe_get_string(l, "name"));
+                    lj.push_back("type", ltype);
                     
                     int card_count = 0;
                     if (b["included"].has("cards")) {
@@ -300,6 +308,8 @@ coke::Task<wfrest::Json> ResourceRegistry::read_resource(const std::string& uri,
                 }
             }
             summary.push_back("lists", lists_summary);
+            if (!archive_list_id.empty()) summary.push_back("archiveListId", archive_list_id);
+            if (!trash_list_id.empty())   summary.push_back("trashListId", trash_list_id);
             
             wfrest::Json labels_options = wfrest::Json::Array();
             if (b.has("included") && b["included"].has("labels")) {
@@ -312,7 +322,10 @@ coke::Task<wfrest::Json> ResourceRegistry::read_resource(const std::string& uri,
                 }
             }
             summary.push_back("availableLabels", labels_options);
-            summary.push_back("_hint", "Use planka_action with add_card_label or remove_card_label to manage card labels chosen from availableLabels.");
+            std::string hint = "Use planka_action with add_card_label or remove_card_label to manage card labels chosen from availableLabels. ";
+            hint += "To ARCHIVE a card: move it to the list with type='archive' (use archiveListId if shown) via planka_update(entity_type:'card', id:..., data:{listId:'<archiveListId>'}). ";
+            hint += "NOTE: isClosed on cards is READ-ONLY, set automatically when the parent list type changes to 'closed'. Do NOT use isClosed or isArchived to archive cards.";
+            summary.push_back("_hint", hint);
             
             co_return wrap_content(uri, summary.dump());
         }

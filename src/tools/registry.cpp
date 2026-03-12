@@ -130,17 +130,61 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
         return response_content;
     };
 
+    std::string usage_warning = "";
+    wfrest::Json processed_args = wfrest::Json::Object();
+
+    // Universal Argument Processor (Scenario C: Field level nested JSON strings)
+    if (arguments.is_object()) {
+        for (auto it = arguments.begin(); it != arguments.end(); ++it) {
+            std::string key = it->key();
+            wfrest::Json val = *it;
+
+            if (val.is_string()) {
+                std::string s_val = val.get<std::string>();
+                wfrest::Json nested = wfrest::Json::parse(s_val);
+                // Robust Scenario C detection: parsed is object && size is 1 && has(field_name)
+                if (nested.is_valid() && nested.is_object() && nested.size() == 1 && nested.has(key)) {
+                    processed_args.push_back(key, nested[key]);
+                    usage_warning = "[INCORRECT USAGE WARNING]: Detected nested JSON string in field '" + key + "'. "
+                                    "Expected a direct value, but received a JSON-encoded object containing the field. "
+                                    "The server has auto-patched this, but please fix your client.";
+                    continue;
+                }
+            }
+            processed_args.push_back(key, val);
+        }
+    } else {
+        processed_args = arguments;
+    }
+
+    auto inject_warning = [&](wfrest::Json& content) {
+        if (!usage_warning.empty() && content.is_array()) {
+            wfrest::Json w_item = wfrest::Json::Object();
+            w_item.push_back("type", "text");
+            w_item.push_back("text", usage_warning);
+            
+            wfrest::Json new_content = wfrest::Json::Array();
+            new_content.push_back(w_item);
+            for (size_t i = 0; i < content.size(); ++i) {
+                new_content.push_back(content[i]);
+            }
+            content = new_content;
+        }
+    };
+
     if (name == "planka_explore") {
         std::string uri = "";
         bool show_templates = false;
 
-        if (arguments.has("uri") && arguments["uri"].is_string()) {
-            uri = arguments["uri"].get<std::string>();
-        }
-        if (arguments.has("templates") && arguments["templates"].is_boolean()) {
-            show_templates = arguments["templates"].get<bool>();
+        if (processed_args.has("uri") && processed_args["uri"].is_string()) {
+            uri = processed_args["uri"].get<std::string>();
         }
 
+        if (processed_args.has("templates") && processed_args["templates"].is_boolean()) {
+            show_templates = processed_args["templates"].get<bool>();
+        }
+
+        wfrest::Json tool_content = wfrest::Json::Array();
         if (uri.empty()) {
             wfrest::Json discovery = wfrest::Json::Object();
             if (show_templates) {
@@ -167,21 +211,19 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
                 discovery.push_back("_hint", "Call with templates:true to see all URI templates, or provide a specific URI to explore data.");
             }
 
-            wfrest::Json content = wfrest::Json::Array();
             wfrest::Json item = wfrest::Json::Object();
             item.push_back("type", "text");
             item.push_back("text", discovery.dump(4));
-            content.push_back(item);
-            co_return content;
+            tool_content.push_back(item);
+            inject_warning(tool_content);
+            co_return tool_content;
         }
         
         wfrest::Json resource_data = co_await resource_registry_.read_resource(uri, client);
         if (resource_data.is_array() && !resource_data.empty()) {
-            wfrest::Json tool_content = wfrest::Json::Array();
             for (const auto& item : resource_data) {
                 wfrest::Json text_item = wfrest::Json::Object();
                 text_item.push_back("type", "text");
-                // Resource response from read_resource has "text" field
                 if (item.has("text")) {
                     text_item.push_back("text", item["text"]);
                 } else {
@@ -189,30 +231,31 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
                 }
                 tool_content.push_back(text_item);
             }
+            inject_warning(tool_content);
             co_return tool_content;
         } else {
-            co_return make_err("Error: Resource not found or unsupported URI for explore: " + uri);
+            co_return make_err("Error: Resource not found or unsupported URI: " + uri);
         }
     }
 
     if (name == "planka_create" || name == "planka_update" || name == "planka_delete") {
-        if (!arguments.has("entity_type") || !arguments["entity_type"].is_string()) {
+        if (!processed_args.has("entity_type") || !processed_args["entity_type"].is_string()) {
             co_return make_err("Error: Missing entity_type in arguments");
         }
-        std::string etype = arguments["entity_type"].get<std::string>();
+        std::string etype = processed_args["entity_type"].get<std::string>();
         std::string internal_name = "";
         
         if (name == "planka_create") internal_name = "create_" + etype;
         else if (name == "planka_update") internal_name = "update_" + etype;
         else if (name == "planka_delete") internal_name = "delete_" + etype;
         
-        wfrest::Json internal_args = arguments.has("data") && arguments["data"].is_object() ? arguments["data"] : wfrest::Json::Object();
+        wfrest::Json internal_args = processed_args.has("data") && processed_args["data"].is_object() ? processed_args["data"] : wfrest::Json::Object();
         
-        if (arguments.has("id")) {
-            internal_args.push_back("id", arguments["id"]);
+        if (processed_args.has("id")) {
+            internal_args.push_back("id", processed_args["id"]);
         }
-        if (arguments.has("parent_id") && arguments["parent_id"].is_string()) {
-             std::string parent_id = arguments["parent_id"].get<std::string>();
+        if (processed_args.has("parent_id") && processed_args["parent_id"].is_string()) {
+             std::string parent_id = processed_args["parent_id"].get<std::string>();
              if (etype == "board") internal_args.push_back("projectId", parent_id);
              else if (etype == "list") internal_args.push_back("boardId", parent_id);
              else if (etype == "card") internal_args.push_back("listId", parent_id);
@@ -234,28 +277,31 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
 
         for (const auto& def : definitions_) {
             if (def.name == internal_name) {
-                co_return co_await execute_generic(def, internal_args, client);
+                wfrest::Json res = co_await execute_generic(def, internal_args, client);
+                inject_warning(res);
+                co_return res;
             }
         }
-        co_return make_err("Error: Unknown entity type or operation not supported: " + internal_name);
+        co_return make_err("Error: Unknown entity type or operation: " + internal_name);
     } 
     else if (name == "planka_action") {
-        if (!arguments.has("action") || !arguments["action"].is_string()) {
+        if (!processed_args.has("action") || !processed_args["action"].is_string()) {
             co_return make_err("Error: Missing action in arguments");
         }
-        std::string internal_name = arguments["action"].get<std::string>();
-        // Name normalization for backward compatibility and internal consistency
+        std::string internal_name = processed_args["action"].get<std::string>();
         if (internal_name == "setup_card_member" || internal_name == "add_card_member") {
             internal_name = "create_card_membership";
         } else if (internal_name == "add_card_label") {
             internal_name = "create_card_label";
         }
 
-        wfrest::Json internal_args = arguments.has("data") && arguments["data"].is_object() ? arguments["data"] : wfrest::Json::Object();
+        wfrest::Json internal_args = processed_args.has("data") && processed_args["data"].is_object() ? processed_args["data"] : wfrest::Json::Object();
         
         for (const auto& def : definitions_) {
             if (def.name == internal_name) {
-                co_return co_await execute_generic(def, internal_args, client);
+                wfrest::Json res = co_await execute_generic(def, internal_args, client);
+                inject_warning(res);
+                co_return res;
             }
         }
         co_return make_err("Error: Unknown action: " + internal_name);
@@ -275,8 +321,6 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
     };
 
     std::string path = def.path;
-    
-    // Replace URL parameters like {id}
     std::regex param_regex(R"(\{([^}]+)\})");
     std::string current_path = path;
     std::smatch match;
@@ -299,56 +343,46 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
     LOG_INFO() << "[ToolRegistry] " << def.name << " | Args: " << args.dump();
     LOG_INFO() << "[ToolRegistry] Calling API: " << def.method << " " << path;
 
-    // Construct request body from remaining args
     wfrest::Json body = wfrest::Json::Object();
     for (const auto& field : def.fields) {
-        // Only add to body if field is NOT a path parameter (like {id})
         if (args.has(field.name) && def.path.find("{" + field.name + "}") == std::string::npos) {
             body.push_back(field.name, args[field.name]);
         }
     }
 
-    // Default position/type if needed for creation (Researched: Planka uses Numeric GAP=16384)
     if (def.method == "POST") {
         bool is_card_creation = (path.find("/api/lists/") != std::string::npos && path.find("/cards") != std::string::npos && path.find("/attachments") == std::string::npos);
         if (is_card_creation || 
             path.find("/api/boards/") != std::string::npos && path.find("/lists") != std::string::npos ||
-            path.find("/api/projects/") != std::string::npos && path.find("/boards") != std::string::npos) {
+            path.find("/api/projects/") != std::string::npos && path.find("/boards") != std::string::npos ||
+            path.find("/labels") != std::string::npos ||
+            path.find("/task-lists") != std::string::npos ||
+            path.find("/tasks") != std::string::npos ||
+            path.find("/duplicate") != std::string::npos) {
             
-            if (!body.has("position"))
-                body.push_back("position", 16384); // Optimized default GAP
+            if (!body.has("position")) body.push_back("position", 16384);
         }
 
         if (is_card_creation) {
-            // Cards in Planka v2 default to 'project' type if not specified
-            if (!body.has("type"))
-                body.push_back("type", "project");
+            if (!body.has("type")) body.push_back("type", "project");
         }
-        // ONLY lists require 'type' as 'active' or 'closed' during POST /api/boards/{id}/lists
         if (path.find("/lists") != std::string::npos && path.find("/cards") == std::string::npos) {
-            if (!body.has("type"))
-                body.push_back("type", "active");
+            if (!body.has("type")) body.push_back("type", "active");
         }
     }
-    LOG_INFO() << "[ToolRegistry] Body: " << body.dump();
 
     wfrest::Json api_res;
-    if (def.method == "POST") {
-        api_res = co_await client.post(path, body);
-    } else if (def.method == "PATCH") {
-        api_res = co_await client.patch(path, body);
-    } else if (def.method == "DELETE") {
-        api_res = co_await client.del(path);
-    } else if (def.method == "GET") {
-        api_res = co_await client.get(path);
-    }
+    if (def.method == "POST") api_res = co_await client.post(path, body);
+    else if (def.method == "PATCH") api_res = co_await client.patch(path, body);
+    else if (def.method == "DELETE") api_res = co_await client.del(path);
+    else if (def.method == "GET") api_res = co_await client.get(path);
 
     wfrest::Json response_content = wfrest::Json::Array();
     wfrest::Json item = wfrest::Json::Object();
     item.push_back("type", "text");
     
     if (!api_res.is_valid() || api_res.is_null()) {
-        item.push_back("text", "Error: API returned empty or invalid response for " + def.name);
+        item.push_back("text", "Error: API returned empty or invalid response");
         response_content.push_back(item);
         co_return response_content;
     }
@@ -372,21 +406,17 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
         } else if (planka_code == "E_UNPROCESSABLE_ENTITY") {
             err_msg += "Unprocessable entity (e.g., duplicate membership or missing requirements). " + planka_msg;
         } else {
-            err_msg += (!planka_code.empty() ? "[" + planka_code + "] " : "") + (!planka_msg.empty() ? planka_msg : "Unknown Planka API error");
+            err_msg += (!planka_code.empty() ? "[" + planka_code + "] " : "") + (!planka_msg.empty() ? planka_msg : "Unknown error");
         }
-        
         item.push_back("text", err_msg);
         response_content.push_back(item);
         co_return response_content;
     }
 
     wfrest::Json target = api_res.has("item") ? api_res["item"] : api_res;
-    
-    if (target.is_valid() && (target.has("id") || api_res.is_array() || api_res.is_null() || api_res.has("success")))
-    {
+    if (target.is_valid() && (target.has("id") || api_res.is_array() || api_res.has("success"))) {
         std::string msg = "Successfully executed " + def.name + ".";
-        if (target.has("id"))
-            msg += " ID: `" + target["id"].get<std::string>() + "`";
+        if (target.has("id")) msg += " ID: `" + target["id"].get<std::string>() + "`";
         item.push_back("text", msg);
     } else {
         item.push_back("text", "Finished executing " + def.name + " with response: " + api_res.dump());
@@ -404,10 +434,8 @@ wfrest::Json ToolRegistry::build_schema(const ToolDef& def) {
 
     for (const auto& field : def.fields) {
         wfrest::Json prop = wfrest::Json::Object();
-        
-        if (field.type == "checkbox") {
-            prop.push_back("type", "boolean");
-        } else if (field.type == "dropdown") {
+        if (field.type == "checkbox") prop.push_back("type", "boolean");
+        else if (field.type == "dropdown") {
             prop.push_back("type", "string");
             if (!field.options.empty()) {
                 wfrest::Json enums = wfrest::Json::Array();
@@ -416,22 +444,17 @@ wfrest::Json ToolRegistry::build_schema(const ToolDef& def) {
             }
         } else if (field.type == "date") {
             prop.push_back("type", "string");
-            prop.push_back("description", field.description + " (ISO 8601 date string)");
+            prop.push_back("description", field.description + " (ISO 8601)");
         } else {
             prop.push_back("type", field.type);
         }
-        
         prop.push_back("description", field.description);
         properties.push_back(field.name, prop);
-        if (field.required) {
-            required.push_back(field.name);
-        }
+        if (field.required) required.push_back(field.name);
     }
 
     schema.push_back("properties", properties);
-    if (required.size() > 0) {
-        schema.push_back("required", required);
-    }
+    if (required.size() > 0) schema.push_back("required", required);
     return schema;
 }
 
@@ -551,10 +574,10 @@ void ToolRegistry::init_definitions() {
         {"id", "Card ID", "string", true}
     }});
 
-    definitions_.push_back({"move_card", "Move a card", "PATCH", "/api/cards/{id}", {
+    definitions_.push_back({"move_card", "Move a card to a different list or board. To ARCHIVE a card, move it to the list with type='archive' (find it via archiveListId in board summary).", "PATCH", "/api/cards/{id}", {
         {"id", "Card ID", "string", true},
         {"boardId", "New board ID", "string", false},
-        {"listId", "New list ID", "string", true},
+        {"listId", "New list ID. Use archiveListId from board summary to archive the card.", "string", true},
         {"position", "New position", "number", false}
     }});
 
