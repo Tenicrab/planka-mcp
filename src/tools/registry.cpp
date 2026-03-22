@@ -299,8 +299,11 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
         else if (name == "planka_update") internal_name = "update_" + etype;
         else if (name == "planka_delete") internal_name = "delete_" + etype;
         
-        bool data_is_empty = !processed_args.has("data") || !processed_args["data"].is_object() || processed_args["data"].size() == 0;
-        wfrest::Json internal_args = (!data_is_empty) ? processed_args["data"] : wfrest::Json::Object();
+        // delete 操作不需要 data 字段，不触发 Help；只有 create/update 才需要 data
+        bool data_is_empty = (name != "planka_delete") &&
+            (!processed_args.has("data") || !processed_args["data"].is_object() || processed_args["data"].size() == 0);
+        wfrest::Json internal_args = (processed_args.has("data") && processed_args["data"].is_object() && processed_args["data"].size() > 0)
+            ? processed_args["data"] : wfrest::Json::Object();
         
         if (processed_args.has("id")) {
             std::string id_val = safe_get_string(processed_args, "id");
@@ -331,20 +334,20 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
              if (etype == "board") internal_args.push_back("projectId", parent_id);
              else if (etype == "list") internal_args.push_back("boardId", parent_id);
              else if (etype == "card") internal_args.push_back("listId", parent_id);
-             else if (etype == "task_list") internal_args.push_back("cardId", parent_id);
+             else if (etype == "task_list") { internal_args.push_back("cardId", parent_id); internal_args.push_back("id", parent_id); }
              else if (etype == "task") internal_args.push_back("taskListId", parent_id);
-             else if (etype == "comment") internal_args.push_back("cardId", parent_id);
-             else if (etype == "label" || etype == "board_custom_field_group") internal_args.push_back("boardId", parent_id);
+             else if (etype == "comment") { internal_args.push_back("cardId", parent_id); internal_args.push_back("id", parent_id); }
+             else if (etype == "label" || etype == "board_custom_field_group") { internal_args.push_back("boardId", parent_id); internal_args.push_back("id", parent_id); }
              else if (etype == "card_custom_field_group") internal_args.push_back("cardId", parent_id);
              else if (etype == "custom_field") internal_args.push_back("customFieldGroupId", parent_id);
              else if (etype == "base_custom_field") internal_args.push_back("baseCustomFieldGroupId", parent_id);
-             else if (etype == "attachment") internal_args.push_back("cardId", parent_id);
+             else if (etype == "attachment") { internal_args.push_back("cardId", parent_id); internal_args.push_back("id", parent_id); }
              else if (etype == "board_notification_service") internal_args.push_back("boardId", parent_id);
              else if (etype == "user_notification_service") internal_args.push_back("userId", parent_id);
              else if (etype == "project_manager") internal_args.push_back("projectId", parent_id);
              else if (etype == "board_membership") internal_args.push_back("boardId", parent_id);
-             else if (etype == "card_membership") internal_args.push_back("cardId", parent_id);
-             else if (etype == "card_label") internal_args.push_back("cardId", parent_id);
+             else if (etype == "card_membership") { internal_args.push_back("cardId", parent_id); internal_args.push_back("id", parent_id); }
+             else if (etype == "card_label") { internal_args.push_back("cardId", parent_id); internal_args.push_back("id", parent_id); }
          }
 
         for (const auto& def : definitions_) {
@@ -507,7 +510,11 @@ coke::Task<wfrest::Json> ToolRegistry::execute_generic(const ToolDef& def, const
                 err_msg += "Check IDs and ensure the parent resource exists.";
             }
         } else if (planka_code == "E_UNPROCESSABLE_ENTITY") {
-            err_msg += "Unprocessable entity (e.g., duplicate membership or missing requirements). " + planka_msg;
+            if (def.name.find("delete_") == 0) {
+                err_msg += planka_msg + ". Delete all contained entities first, then retry.";
+            } else {
+                err_msg += "Unprocessable entity (e.g., duplicate membership or missing requirements). " + planka_msg;
+            }
         } else {
             err_msg += (!planka_code.empty() ? "[" + planka_code + "] " : "") + (!planka_msg.empty() ? planka_msg : "Unknown error");
         }

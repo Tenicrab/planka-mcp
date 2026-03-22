@@ -3,6 +3,7 @@
 #include <iostream>
 #include <ctime>
 #include <cstdlib>
+#include <sys/socket.h>
 #include <workflow/WFFacilities.h>
 #include <logger.h>
 
@@ -198,8 +199,8 @@ void HttpSseTransport::run(MessageHandler handler) {
     server_.POST("/*", wild_handler);
     server_.GET("/*", wild_handler);
 
-    if (server_.start(port_) == 0) {
-        LOG_INFO() << "MCP Server (SSE) started on port " << port_;
+    if (server_.start(AF_INET6, nullptr, static_cast<unsigned short>(port_)) == 0) {
+        LOG_INFO() << "MCP Server (SSE) started on [::]" << ":" << port_ << " (dual-stack IPv4+IPv6)";
         WFFacilities::WaitGroup wait_group(1);
         wait_group.wait();
         server_.stop();
