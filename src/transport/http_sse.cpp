@@ -5,6 +5,9 @@
 #include <cstdlib>
 #include <sys/socket.h>
 #include <workflow/WFFacilities.h>
+#include <coke/coke.h>
+#include <coke/sleep.h>
+#include <coke/make_task.h>
 #include <logger.h>
 
 namespace mcp {
@@ -88,43 +91,41 @@ void HttpSseTransport::run(MessageHandler handler) {
             LOG_INFO() << "SSE Client disconnected. Session cleaned: " << sessionId;
         });
 
-        // 定时心跳，每 15 秒触发一次当前会话的 Push 发送一次心跳包
-        struct HeartbeatTimer {
-            std::string sessionId;
-            std::weak_ptr<Session> weak_session;
-            HttpSseTransport* transport;
-            void operator()(WFTimerTask*) const {
-                auto sess = weak_session.lock();
+        // 定时心跳：使用 coke 协程驱动，无需递归创建裸定时器任务，自动休眠与退出
+        auto heartbeat_coro = [](std::string sess_id, std::weak_ptr<Session> weak_sess, HttpSseTransport* transport) -> coke::Task<void> {
+            while (true) {
+                co_await coke::sleep(std::chrono::seconds(15));
+                auto sess = weak_sess.lock();
                 if (!sess || !sess->is_alive.load(std::memory_order_relaxed)) {
-                    return;
+                    break;
                 }
                 bool active = false;
                 {
                     std::lock_guard<std::mutex> lock(transport->sessions_mutex_);
-                    if (transport->sessions_.find(sessionId) != transport->sessions_.end()) {
-                        active = true;
-                    }
+                    active = (transport->sessions_.find(sess_id) != transport->sessions_.end());
                 }
-                if (active && sess->is_alive.load(std::memory_order_relaxed)) {
-                    wfrest::sse_signal(sessionId);
-                    // 只有存活时才递归启动下一个定时器
-                    WFTaskFactory::create_timer_task(15, 0, *this)->start();
+                if (!active || !sess->is_alive.load(std::memory_order_relaxed)) {
+                    break;
                 }
+                wfrest::sse_signal(sess_id);
             }
+            co_return;
         };
-        HeartbeatTimer ht{sessionId, session, this};
-        
-        WFTaskFactory::create_timer_task(15, 0, ht)->start();
+
+        coke::detach(heartbeat_coro(sessionId, session, this));
         
         // 第一个端点建立事件 (延迟1毫秒确保push回调注册好)
-        std::weak_ptr<Session> weak_init = session;
-        WFTaskFactory::create_timer_task(0, 1000 * 1000, [sessionId, weak_init](WFTimerTask *timer) {
-            auto sess = weak_init.lock();
+        auto init_coro = [](std::string sess_id, std::weak_ptr<Session> weak_sess) -> coke::Task<void> {
+            co_await coke::sleep(std::chrono::milliseconds(1));
+            auto sess = weak_sess.lock();
             if (sess && sess->is_alive.load(std::memory_order_relaxed)) {
-                LOG_DEBUG() << "Init timer fired, signaling session " << sessionId;
-                wfrest::sse_signal(sessionId);
+                LOG_DEBUG() << "Init timer fired, signaling session " << sess_id;
+                wfrest::sse_signal(sess_id);
             }
-        })->start();
+            co_return;
+        };
+
+        coke::detach(init_coro(sessionId, session));
     };
 
     server_.GET("/", sse_handler);

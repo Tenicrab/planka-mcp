@@ -4,6 +4,7 @@
 #include <wfrest/Json.h>
 #include <unordered_set>
 #include <logger.h>
+#include "config.h"
 
 namespace mcp {
 

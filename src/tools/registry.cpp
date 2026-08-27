@@ -2,6 +2,7 @@
 #include <regex>
 #include <logger.h>
 #include "../resources/registry.h"
+#include "config.h"
 
 namespace mcp {
 
@@ -250,6 +251,7 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
         wfrest::Json tool_content = wfrest::Json::Array();
         if (uri.empty()) {
             wfrest::Json discovery = wfrest::Json::Object();
+            discovery.push_back("mcpServerVersion", PLANKA_MCP_VERSION);
             if (show_templates) {
                 wfrest::Json templates = wfrest::Json::Array();
                 for (const auto& t : resource_registry_.list_templates()) {

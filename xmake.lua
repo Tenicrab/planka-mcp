@@ -2,7 +2,7 @@ add_rules("mode.debug", "mode.release")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "build"})
 
 set_project("planka-mcp")
-set_version("26.03.22")
+set_version("26.08.28")
 set_languages("c++20")
 add_cxflags("-static-libstdc++", "-static-libgcc", {force = true})
 add_ldflags("-static-libstdc++", "-static-libgcc", {force = true})
