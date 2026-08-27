@@ -52,6 +52,9 @@ void HttpSseTransport::run(MessageHandler handler) {
 
         // 使用 wfrest 官方推荐的 Push 方式发送 SSE 事件
         resp->Push(sessionId, [this, sessionId, session, endpointUrl](std::string &body) {
+            if (!session->is_alive.load(std::memory_order_relaxed)) {
+                return;
+            }
             LOG_DEBUG() << "Push Callback executing for " << sessionId;
             std::lock_guard<std::mutex> lock(session->mutex);
             body.clear();
@@ -77,18 +80,24 @@ void HttpSseTransport::run(MessageHandler handler) {
             if (!sent_msg && session->initial_sent) {
                 body.append(": heartbeat\n\n");
             }
-        }, [this, sessionId]() {
-            // 当客户端断开连接时，清理 session
+        }, [this, sessionId, session]() {
+            // 当客户端断开连接时，立即标记 session 死亡并从列表清理，切断定时器
+            session->is_alive.store(false, std::memory_order_relaxed);
             std::lock_guard<std::mutex> lock(sessions_mutex_);
             sessions_.erase(sessionId);
+            LOG_INFO() << "SSE Client disconnected. Session cleaned: " << sessionId;
         });
 
         // 定时心跳，每 15 秒触发一次当前会话的 Push 发送一次心跳包
-        // 这里使用 Functor 传值，避免闭包循环引用
         struct HeartbeatTimer {
             std::string sessionId;
+            std::weak_ptr<Session> weak_session;
             HttpSseTransport* transport;
             void operator()(WFTimerTask*) const {
+                auto sess = weak_session.lock();
+                if (!sess || !sess->is_alive.load(std::memory_order_relaxed)) {
+                    return;
+                }
                 bool active = false;
                 {
                     std::lock_guard<std::mutex> lock(transport->sessions_mutex_);
@@ -96,22 +105,25 @@ void HttpSseTransport::run(MessageHandler handler) {
                         active = true;
                     }
                 }
-                if (active) {
+                if (active && sess->is_alive.load(std::memory_order_relaxed)) {
                     wfrest::sse_signal(sessionId);
-                    // 递归启动下一个定时器（完全独立于当前 Series，防止阻塞）
+                    // 只有存活时才递归启动下一个定时器
                     WFTaskFactory::create_timer_task(15, 0, *this)->start();
                 }
             }
         };
-        HeartbeatTimer ht{sessionId, this};
+        HeartbeatTimer ht{sessionId, session, this};
         
-        // 分别向独立的队列中丢入定时器
         WFTaskFactory::create_timer_task(15, 0, ht)->start();
         
         // 第一个端点建立事件 (延迟1毫秒确保push回调注册好)
-        WFTaskFactory::create_timer_task(0, 1000 * 1000, [sessionId](WFTimerTask *timer) {
-            LOG_DEBUG() << "Init timer fired, signaling session " << sessionId;
-            wfrest::sse_signal(sessionId);
+        std::weak_ptr<Session> weak_init = session;
+        WFTaskFactory::create_timer_task(0, 1000 * 1000, [sessionId, weak_init](WFTimerTask *timer) {
+            auto sess = weak_init.lock();
+            if (sess && sess->is_alive.load(std::memory_order_relaxed)) {
+                LOG_DEBUG() << "Init timer fired, signaling session " << sessionId;
+                wfrest::sse_signal(sessionId);
+            }
         })->start();
     };
 
@@ -199,7 +211,7 @@ void HttpSseTransport::run(MessageHandler handler) {
     server_.POST("/*", wild_handler);
     server_.GET("/*", wild_handler);
 
-    if (server_.start(AF_INET6, nullptr, static_cast<unsigned short>(port_)) == 0) {
+    if (server_.start(AF_INET6, "::", static_cast<unsigned short>(port_)) == 0) {
         LOG_INFO() << "MCP Server (SSE) started on [::]" << ":" << port_ << " (dual-stack IPv4+IPv6)";
         WFFacilities::WaitGroup wait_group(1);
         wait_group.wait();

@@ -3,6 +3,7 @@
 #include <wfrest/HttpServer.h>
 #include <map>
 #include <mutex>
+#include <atomic>
 #include <queue>
 #include <memory>
 #include <string>
@@ -21,6 +22,7 @@ private:
         std::queue<std::string> messages;
         std::mutex mutex;
         bool initial_sent = false;
+        std::atomic<bool> is_alive{true};
     };
 
     int port_;

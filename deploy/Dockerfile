@@ -14,12 +14,16 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     zlib1g-dev \
     unzip \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install xmake
-RUN wget https://xmake.io/shget.text -O - | bash
+RUN curl -fsSL https://github.com/xmake-io/xmake/releases/download/v3.0.8/xmake-v3.0.8.gz.run -o /tmp/xmake.gz.run \
+    && bash /tmp/xmake.gz.run \
+    && rm -f /tmp/xmake.gz.run
 ENV PATH="/root/.xmake/profile:${PATH}"
 ENV PATH="/root/.local/bin:${PATH}"
+ENV XMAKE_MAIN_REPO=https://github.com/xmake-io/xmake-repo.git
 
 WORKDIR /app
 

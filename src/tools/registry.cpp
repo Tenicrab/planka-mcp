@@ -147,15 +147,21 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
     std::string usage_warning = "";
     wfrest::Json processed_args = wfrest::Json::Object();
 
-    auto get_field_help = [](const std::string& tool_name, const ToolDef& def) {
-        std::string usage = "Help for '" + tool_name + "':\nRequired fields in 'data': ";
+    auto get_field_help = [](const std::string& tool_name, const ToolDef& def, bool mention_parent_id = true) {
+        std::string usage = "Help for '" + tool_name + "': " + def.description + "\nRequired fields in 'data': ";
         std::string optional = "\nOptional fields in 'data': ";
+        std::string path_params = "";
         bool has_req = false;
         bool has_opt = false;
+        bool has_path = false;
         
         for (const auto& field : def.fields) {
-            // Skip fields already parsed from URL (those with placeholders in path)
-            if (def.path.find("{" + field.name + "}") != std::string::npos) continue;
+            // Collect path parameters separately and show them explicitly
+            if (def.path.find("{" + field.name + "}") != std::string::npos) {
+                path_params += field.name + " (" + field.description + "), ";
+                has_path = true;
+                continue;
+            }
             
             std::string field_info = field.name + " (" + field.description + ")";
             if (!field.options.empty()) {
@@ -179,6 +185,13 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
         if (has_opt) {
             optional.erase(optional.length() - 2);
             usage += optional;
+        }
+        if (has_path) {
+            path_params.erase(path_params.length() - 2);
+            std::string path_hint = mention_parent_id
+                ? "URL path params (pass directly in 'data', or use 'parent_id' for planka_create/update/delete): "
+                : "URL path params (must be passed directly in 'data' using the exact field name shown): ";
+            usage += "\n" + path_hint + path_params;
         }
         return usage;
     };
@@ -402,10 +415,24 @@ coke::Task<wfrest::Json> ToolRegistry::call_tool(const std::string& name, const 
             wfrest::Json res = wfrest::Json::Array();
             wfrest::Json item = wfrest::Json::Object();
             item.push_back("type", "text");
-            item.push_back("text", get_field_help("planka_action(action:'" + internal_name + "')", *target_def));
+            item.push_back("text", get_field_help("planka_action(action:'" + internal_name + "')", *target_def, false));
             res.push_back(item);
             inject_warning(res);
             co_return res;
+        }
+
+        // Broadcast alias fields to 'id' if the action path uses {id} but user passed cardId/userId/listId
+        if (target_def->path.find("{id}") != std::string::npos && !internal_args.has("id")) {
+            for (const auto* alias : {"cardId", "userId", "listId", "taskListId"}) {
+                if (internal_args.has(alias)) {
+                    std::string alias_str = alias;
+                    internal_args.push_back("id", safe_get_string(internal_args, alias_str));
+                    usage_warning = "[INCORRECT USAGE WARNING]: planka_action(action:'" + internal_name + "') "
+                        "expects field 'id' (not '" + alias_str + "') in 'data'. "
+                        "The server has auto-patched this, but please use the canonical field name 'id'.";
+                    break;
+                }
+            }
         }
 
         wfrest::Json res = co_await execute_generic(*target_def, internal_args, client);
@@ -734,7 +761,7 @@ void ToolRegistry::init_definitions() {
         {"id", "Label ID", "string", true}
     }});
 
-    definitions_.push_back({"create_card_label", "Add label to card", "POST", "/api/cards/{id}/card-labels", {
+    definitions_.push_back({"create_card_label", "Assign an existing label to a card. NOTE: this assigns a label that already exists on the board. To create a new label on a board, use planka_create(entity_type:'label').", "POST", "/api/cards/{id}/card-labels", {
         {"id", "Card ID", "string", true},
         {"labelId", "Label ID", "string", true}
     }});

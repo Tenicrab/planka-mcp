@@ -3,19 +3,21 @@ add_rules("plugin.compile_commands.autoupdate", {outputdir = "build"})
 
 set_project("planka-mcp")
 set_version("26.03.22")
-set_languages("cxx20")
+set_languages("c++20")
+add_cxflags("-static-libstdc++", "-static-libgcc", {force = true})
+add_ldflags("-static-libstdc++", "-static-libgcc", {force = true})
 
--- 引入 wfrest (基于静态链接，将自动附带引入 workflow)
-add_requires("workflow", {configs = {shared = false}})
-add_requires("wfrest", {configs = {shared = false}})
-add_requires("openssl")
-
--- 将无构建系统的第三方库打包方案分离出主文件
+includes("packages/workflow/xmake.lua")
+includes("packages/wfrest/xmake.lua")
 includes("packages/coke/xmake.lua")
 includes("packages/maplog/xmake.lua")
 
-add_requires("coke")
-add_requires("maplog")
+add_requires("openssl", {system = true})
+add_requires("zlib", {configs = {shared = false}})
+add_requires("workflow", {configs = {shared = false}})
+add_requires("wfrest", {configs = {shared = false}})
+add_requires("coke", {configs = {shared = false}})
+add_requires("maplog", {configs = {shared = false}})
 
 -- 主程序构建目标
 target("planka-mcp")
